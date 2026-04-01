@@ -282,6 +282,44 @@ section { padding: 6rem 3rem; }
   max-width: 1200px; margin: 0 auto;
 }
 
+/* ===== RECENTLY SOLD SECTION ===== */
+#sold {
+  background: var(--cream);
+  position: relative;
+}
+#sold::before {
+  content: '';
+  position: absolute; top: 0; left: 0; width: 100%; height: 4px;
+  background: linear-gradient(90deg, var(--forest), var(--sage), var(--forest));
+}
+.sold-section-header { text-align: center; margin-bottom: 4rem; }
+.sold-section-header .section-subtitle { margin: 0.5rem auto 0; }
+.sold-properties-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 2rem;
+  max-width: 1200px; margin: 0 auto;
+}
+#sold .property-card {
+  opacity: 0.85;
+  filter: saturate(0.7);
+  cursor: default;
+  pointer-events: none;
+}
+#sold .property-card:hover { transform: none; box-shadow: none; }
+body.edit-mode-active #sold .property-card {
+  opacity: 1; filter: none; cursor: pointer; pointer-events: auto;
+}
+body.edit-mode-active #sold .property-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 50px rgba(44,24,16,0.15);
+}
+.sold-edit-toolbar {
+  display: flex; flex-wrap: wrap; gap: 0.75rem 1rem;
+  align-items: center; justify-content: center;
+  max-width: 960px; margin: 0 auto 1rem;
+}
+
 .property-card {
   background: var(--cream);
   border: 1px solid rgba(166,124,82,0.25);
@@ -782,6 +820,7 @@ footer {
   .about-text { padding: 0 1rem; }
   .contact-wrapper { grid-template-columns: 1fr; gap: 2.5rem; }
   .properties-grid { grid-template-columns: 1fr; }
+  .sold-properties-grid { grid-template-columns: 1fr; }
   .about-stats { flex-wrap: wrap; gap: 1.5rem; }
   .form-row { grid-template-columns: 1fr; }
 }
@@ -794,6 +833,7 @@ footer {
   <div class="nav-logo">Bull<span>domingo</span></div>
   <ul class="nav-links" id="navLinks">
     <li><a href="#properties">Properties</a></li>
+    <li><a href="#sold">Recently Sold</a></li>
     <li><a href="#about">Our Story</a></li>
     <li><a href="#why-us">Why Us</a></li>
     <li><a href="#contact">Contact</a></li>
@@ -827,6 +867,7 @@ footer {
   <div class="properties-header" id="propertiesHeader"></div>
   <div id="editModeToolbar" class="edit-mode-toolbar" style="display:none" aria-hidden="true">
     <button type="button" id="btnAddProperty" class="btn btn-primary">+ Add Property</button>
+    <button type="button" id="btnExportSiteData" class="btn btn-outline">&#8659; Export site-data.js</button>
     <div class="edit-page-bar" id="editPageBar">
       <span class="edit-page-bar-label">Edit page</span>
       <button type="button" class="btn btn-outline btn-edit-page" id="btnEditHero" title="Edit top banner">Hero</button>
@@ -835,12 +876,17 @@ footer {
       <button type="button" class="btn btn-outline btn-edit-page" id="btnEditWhyUs">Why Us</button>
       <button type="button" class="btn btn-outline btn-edit-page" id="btnEditContact">Contact &amp; footer</button>
     </div>
-    <div class="edit-page-bar" style="margin-top:0.8rem;">
-      <span class="edit-page-bar-label">Save your work</span>
-      <button type="button" class="btn btn-primary" id="btnExportSiteData" style="background:var(--forest);border-color:var(--forest);">⬇ Export site-data.js</button>
-    </div>
   </div>
   <div class="properties-grid" id="propertiesGrid"></div>
+</section>
+
+<!-- RECENTLY SOLD -->
+<section id="sold">
+  <div class="sold-section-header" id="soldSectionHeader"></div>
+  <div class="sold-edit-toolbar" id="soldEditToolbar" style="display:none" aria-hidden="true">
+    <button type="button" id="btnAddSoldProperty" class="btn btn-primary">+ Add Sold Property</button>
+  </div>
+  <div class="sold-properties-grid" id="soldPropertiesGrid"></div>
 </section>
 
 <!-- ABOUT -->
@@ -902,6 +948,7 @@ footer {
   <div class="footer-logo">Bull<span>domingo</span></div>
   <ul class="footer-links">
     <li><a href="#properties">Properties</a></li>
+    <li><a href="#sold">Recently Sold</a></li>
     <li><a href="#about">Our Story</a></li>
     <li><a href="#contact">Contact</a></li>
   </ul>

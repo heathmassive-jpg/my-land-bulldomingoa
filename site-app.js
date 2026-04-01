@@ -1,11 +1,15 @@
 (function () {
   var LS_SITE = "bulldomingo_site_data_v1";
   var LS_PROPERTIES = "bulldomingo_properties_v1";
+  var LS_SOLD = "bulldomingo_sold_v1";
+  var IDB_KEY_SOLD = "sold_listings";
   var MAX_THUMBS = 10;
 
   var properties = [];
+  var soldProperties = [];
   var currentEditId = null;
   var editingPropertyRef = null;
+  var editingContext = "active"; // "active" | "sold"
   var siteOverrides = {};
   var cmsChannel =
     typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("bulldomingo_cms_listings") : null;
@@ -236,6 +240,7 @@
     var site = getSiteData();
     renderHero(site);
     renderPropertiesHeader(site);
+    renderSoldShowcase(site);
     renderAbout(site);
     renderAboutVisual(site);
     renderWhyUs(site);
@@ -370,6 +375,80 @@
         console.warn("Bulldomingo: IndexedDB save failed; using localStorage fallback.", e);
         return trySavePropertiesLocalStorageFallback(json);
       });
+  }
+
+  function loadSoldPropertiesFromSite() {
+    var site = window.BULLDOMINGO_SITE;
+    if (!site || !Array.isArray(site.soldListings)) return [];
+    return site.soldListings.map(function (l, idx) {
+      var id = -(idx + 1); // negative IDs to avoid collisions with active listings
+      if (l.type === "photos") {
+        return {
+          id: id, title: l.title || "", price: parsePrice(l.price),
+          location: l.location || "", description: l.description || "",
+          images: { hero: l.heroImage || null, thumbs: (l.thumbImages || []).slice(0, MAX_THUMBS) }
+        };
+      }
+      return {
+        id: id, title: l.title || "", price: parsePrice(l.price),
+        location: l.location || "", description: l.description || "",
+        images: { hero: null, thumbs: [] }
+      };
+    });
+  }
+
+  function saveSoldProperties() {
+    var json;
+    try { json = JSON.stringify(soldProperties); } catch (e) {
+      showSaveBanner("Could not serialize sold listings.");
+      return Promise.resolve(false);
+    }
+    return idbPutKey(IDB_KEY_SOLD, json)
+      .then(function () { return idbGetKey(IDB_KEY_SOLD); })
+      .then(function (readBack) {
+        if (readBack !== json) { showSaveBanner("Save did not verify. Try again."); return false; }
+        try { localStorage.removeItem(LS_SOLD); } catch (rm) {}
+        clearSaveBanner();
+        return true;
+      })
+      .catch(function () {
+        try {
+          localStorage.setItem(LS_SOLD, json);
+          clearSaveBanner();
+          return true;
+        } catch (e2) {
+          showSaveBanner("Could not save sold listings. Try removing some images.");
+          return false;
+        }
+      });
+  }
+
+  function loadSoldPropertiesAsync() {
+    return idbGetKey(IDB_KEY_SOLD)
+      .then(function (raw) {
+        if (raw !== null && raw !== undefined) {
+          try {
+            var parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+          } catch (e) {}
+        }
+        try {
+          var ls = localStorage.getItem(LS_SOLD);
+          if (ls) {
+            var p = JSON.parse(ls);
+            if (Array.isArray(p)) return p;
+          }
+        } catch (e) {}
+        return loadSoldPropertiesFromSite();
+      })
+      .catch(function () { return loadSoldPropertiesFromSite(); });
+  }
+
+  function getSoldPropertyById(id) {
+    for (var i = 0; i < soldProperties.length; i++) {
+      if (soldProperties[i].id === id) return soldProperties[i];
+    }
+    return null;
   }
 
   function compressDataUrl(dataUrl, maxSide, quality, done) {
@@ -627,6 +706,59 @@
       '<p class="section-subtitle">' +
       escapeHtml(p.subtitle) +
       "</p>";
+  }
+
+  function renderSoldShowcase(site) {
+    var headerEl = document.getElementById("soldSectionHeader");
+    var gridEl = document.getElementById("soldPropertiesGrid");
+    if (!headerEl || !gridEl) return;
+    var s = (site && site.soldSection) || {};
+    headerEl.innerHTML =
+      '<div class="section-label">' + escapeHtml(s.sectionLabel || "Track Record") + "</div>" +
+      '<h2 class="section-title">' + escapeHtml(s.title || "Recently Sold") + "</h2>" +
+      (s.subtitle ? '<p class="section-subtitle">' + escapeHtml(s.subtitle) + "</p>" : "");
+    if (!soldProperties.length) {
+      gridEl.innerHTML = '<p style="text-align:center;color:var(--saddle);font-size:0.95rem;padding:2rem 0;">No sold properties to display yet.</p>';
+      return;
+    }
+    gridEl.innerHTML = soldProperties.map(function (p) {
+      var imgs = p.images || { hero: null, thumbs: [] };
+      var dataAttr = ' data-sold-id="' + p.id + '"';
+      if (imgs.hero) {
+        var thumbs = (imgs.thumbs || []).map(function (src) {
+          return '<img src="' + escapeHtml(src) + '" alt="">';
+        }).join("");
+        return (
+          '<div class="property-card"' + dataAttr + '>' +
+          '<div class="card-image card-image--listing">' +
+          '<img class="card-hero-img" src="' + escapeHtml(imgs.hero) + '" alt="' + escapeHtml(p.title) + '">' +
+          '<div class="card-photo-thumbs" aria-hidden="true">' + thumbs + "</div>" +
+          '<div class="card-badge sold">Sold</div>' +
+          "</div>" +
+          '<div class="card-body">' +
+          '<div class="card-location">' + PIN_SVG + escapeHtml(p.location) + "</div>" +
+          '<div class="card-title">' + escapeHtml(p.title) + "</div>" +
+          (p.description ? '<p class="card-desc">' + escapeHtml(p.description) + "</p>" : "") +
+          '<div class="card-price">' + formatPrice(p.price) + "</div>" +
+          "</div></div>"
+        );
+      }
+      var themes = ["meadow","desert","mountain","forest","plains","lakefront"];
+      var theme = themes[Math.abs(p.id) % themes.length];
+      return (
+        '<div class="property-card"' + dataAttr + '>' +
+        '<div class="card-image">' +
+        '<div class="card-image-bg ' + theme + '">🏡</div>' +
+        '<div class="card-badge sold">Sold</div>' +
+        "</div>" +
+        '<div class="card-body">' +
+        '<div class="card-location">' + PIN_SVG + escapeHtml(p.location) + "</div>" +
+        '<div class="card-title">' + escapeHtml(p.title) + "</div>" +
+        (p.description ? '<p class="card-desc">' + escapeHtml(p.description) + "</p>" : "") +
+        '<div class="card-price">' + formatPrice(p.price) + "</div>" +
+        "</div></div>"
+      );
+    }).join("");
   }
 
   function renderAbout(site) {
@@ -1186,7 +1318,37 @@
 
   function syncEditingRef() {
     if (currentEditId == null) return;
-    editingPropertyRef = getPropertyById(currentEditId);
+    editingPropertyRef = editingContext === "sold"
+      ? getSoldPropertyById(currentEditId)
+      : getPropertyById(currentEditId);
+  }
+
+  function saveContextProperties() {
+    return editingContext === "sold" ? saveSoldProperties() : saveProperties();
+  }
+
+  function renderContextGrid() {
+    if (editingContext === "sold") {
+      renderSoldShowcase(getSiteData());
+    } else {
+      renderProperties();
+    }
+    setupScrollAnimations();
+  }
+
+  function deleteContextProperty(id) {
+    if (editingContext === "sold") {
+      var next = soldProperties.filter(function (p) { return p.id !== id; });
+      var prev = soldProperties;
+      soldProperties = next;
+      saveSoldProperties().then(function (ok) {
+        if (!ok) { soldProperties = prev; return; }
+        closeModalOnly();
+        renderSoldShowcase(getSiteData());
+      });
+    } else {
+      deleteProperty(id);
+    }
   }
 
   function flushEditFormToProperty() {
@@ -1313,9 +1475,12 @@
     bindEditModalImageEvents();
   }
 
-  function openModal(property) {
+  function openModal(property, ctx) {
+    editingContext = ctx || "active";
     currentEditId = property.id;
-    editingPropertyRef = getPropertyById(property.id);
+    editingPropertyRef = editingContext === "sold"
+      ? getSoldPropertyById(property.id)
+      : getPropertyById(property.id);
     if (!editingPropertyRef) return;
     ensureImagesShape(editingPropertyRef);
 
@@ -1323,8 +1488,9 @@
     var inner = document.getElementById("cmsEditInner");
     if (!inner) return;
 
+    var modalTitle = editingContext === "sold" ? "Edit sold listing" : "Edit listing";
     inner.innerHTML =
-      '<div class="cms-modal-head"><span>Edit listing</span>' +
+      '<div class="cms-modal-head"><span>' + modalTitle + '</span>' +
       '<button type="button" class="cms-modal-close" id="cmsEditClose" aria-label="Close">&times;</button></div>' +
       '<div class="cms-modal-body">' +
       '<div class="cms-field"><label class="cms-label" for="cmsInpTitle">Title</label>' +
@@ -1368,6 +1534,7 @@
     var locEl = document.getElementById("cmsInpLoc");
     var descEl = document.getElementById("cmsInpDesc");
 
+    var capturedContext = editingContext;
     function liveSave() {
       syncEditingRef();
       if (!editingPropertyRef) return;
@@ -1375,13 +1542,12 @@
       editingPropertyRef.price = priceEl ? parseInt(priceEl.value, 10) || 0 : 0;
       editingPropertyRef.location = (locEl && locEl.value) || "";
       editingPropertyRef.description = (descEl && descEl.value) || "";
-      saveProperties().then(function (ok) {
+      saveContextProperties().then(function (ok) {
         if (!ok) return;
         clearCmsGridRenderTimer();
         cmsGridRenderTimer = setTimeout(function () {
           cmsGridRenderTimer = null;
-          renderProperties();
-          setupScrollAnimations();
+          renderContextGrid();
         }, 250);
       });
     }
@@ -1394,7 +1560,7 @@
     document.getElementById("cmsEditClose").onclick = closeModal;
     document.getElementById("cmsDeleteProperty").onclick = function () {
       if (confirm('Delete "' + (editingPropertyRef.title || "this listing") + '"?')) {
-        deleteProperty(currentEditId);
+        deleteContextProperty(currentEditId);
       }
     };
 
@@ -1420,7 +1586,7 @@
 
   function closeModal() {
     flushEditFormToProperty();
-    saveProperties().then(function (ok) {
+    saveContextProperties().then(function (ok) {
       if (!ok) return;
       closeModalOnly();
     });
@@ -1447,7 +1613,45 @@
       }
       renderProperties();
       setupScrollAnimations();
-      openModal(p);
+      openModal(p, "active");
+    });
+  }
+
+  function addSoldProperty() {
+    var minId = 0;
+    for (var i = 0; i < soldProperties.length; i++) {
+      if (soldProperties[i].id < minId) minId = soldProperties[i].id;
+    }
+    var p = {
+      id: minId - 1,
+      title: "",
+      price: 0,
+      location: "",
+      description: "",
+      images: { hero: null, thumbs: [] }
+    };
+    soldProperties.push(p);
+    saveSoldProperties().then(function (ok) {
+      if (!ok) { soldProperties.pop(); return; }
+      renderSoldShowcase(getSiteData());
+      setupScrollAnimations();
+      openModal(p, "sold");
+    });
+  }
+
+  function setupSoldCardClickHandlers() {
+    var grid = document.getElementById("soldPropertiesGrid");
+    if (!grid) return;
+    grid.addEventListener("click", function (e) {
+      var card = e.target.closest(".property-card");
+      if (!card) return;
+      if (!document.body.classList.contains("edit-mode-active")) return;
+      e.preventDefault();
+      var id = parseInt(card.getAttribute("data-sold-id"), 10);
+      if (isNaN(id)) return;
+      var p = getSoldPropertyById(id);
+      if (!p) return;
+      openModal(p, "sold");
     });
   }
 
@@ -1482,10 +1686,9 @@
         if (!editingPropertyRef) return;
         ensureImagesShape(editingPropertyRef);
         editingPropertyRef.images.hero = smaller;
-        saveProperties().then(function (ok) {
+        saveContextProperties().then(function (ok) {
           if (!ok) return;
-          renderProperties();
-          setupScrollAnimations();
+          renderContextGrid();
           refreshEditModalImagesOnly();
         });
       });
@@ -1498,10 +1701,9 @@
     if (!editingPropertyRef) return;
     ensureImagesShape(editingPropertyRef);
     editingPropertyRef.images.hero = null;
-    saveProperties().then(function (ok) {
+    saveContextProperties().then(function (ok) {
       if (!ok) return;
-      renderProperties();
-      setupScrollAnimations();
+      renderContextGrid();
       refreshEditModalImagesOnly();
     });
   }
@@ -1522,10 +1724,9 @@
         ensureImagesShape(editingPropertyRef);
         if (editingPropertyRef.images.thumbs.length >= MAX_THUMBS) return;
         editingPropertyRef.images.thumbs.push(smaller);
-        saveProperties().then(function (ok) {
+        saveContextProperties().then(function (ok) {
           if (!ok) return;
-          renderProperties();
-          setupScrollAnimations();
+          renderContextGrid();
           refreshEditModalImagesOnly();
         });
       });
@@ -1538,10 +1739,9 @@
     if (!editingPropertyRef || index < 0) return;
     ensureImagesShape(editingPropertyRef);
     editingPropertyRef.images.thumbs.splice(index, 1);
-    saveProperties().then(function (ok) {
+    saveContextProperties().then(function (ok) {
       if (!ok) return;
-      renderProperties();
-      setupScrollAnimations();
+      renderContextGrid();
       refreshEditModalImagesOnly();
     });
   }
@@ -1988,43 +2188,35 @@
     };
   }
 
-  /* ================================================================
-     EXPORT site-data.js — bakes current state into a downloadable file
-  ================================================================ */
-  function exportSiteDataJs() {
+  function exportSiteData() {
     var site = getSiteData();
+    var themes = ["meadow", "desert", "mountain", "forest", "plains", "lakefront"];
 
-    // Convert current properties array back into the listings format site-data.js expects
-    var listings = properties.map(function (p) {
+    function propToListing(p, isSold) {
       var imgs = p.images || { hero: null, thumbs: [] };
-      var hero = imgs.hero;
-      var thumbs = imgs.thumbs || [];
-
-      if (hero) {
+      if (imgs.hero) {
         return {
           type: "photos",
-          badge: "New Listing",
-          badgeClass: "",
+          badge: isSold ? "Sold" : "New Listing",
+          badgeClass: isSold ? "sold" : "",
           location: p.location || "",
           title: p.title || "",
           description: p.description || "",
-          heroImage: hero,
+          heroImage: imgs.hero,
           heroAlt: p.title || "",
-          thumbImages: thumbs,
+          thumbImages: (imgs.thumbs || []).slice(0, MAX_THUMBS),
           details: [],
           price: formatPrice(p.price),
           pricePerAcre: ""
         };
       }
-      var themes = ["meadow", "desert", "mountain", "forest", "plains", "lakefront"];
-      var theme = themes[(Number(p.id) || 0) % themes.length];
-      var emojis = { meadow: "🌾", desert: "🏜️", mountain: "🏔️", forest: "🌲", plains: "🌿", lakefront: "🏞️" };
+      var theme = themes[Math.abs(p.id) % themes.length];
       return {
         type: "theme",
         theme: theme,
-        emoji: emojis[theme] || "🌾",
-        badge: "New Listing",
-        badgeClass: "",
+        emoji: isSold ? "🏡" : "🌾",
+        badge: isSold ? "Sold" : "New Listing",
+        badgeClass: isSold ? "sold" : "",
         location: p.location || "",
         title: p.title || "",
         description: p.description || "",
@@ -2032,41 +2224,44 @@
         price: formatPrice(p.price),
         pricePerAcre: ""
       };
-    });
+    }
 
-    // Build the full site object
     var exportObj = {
       hero: site.hero,
       propertiesSection: site.propertiesSection,
-      listings: listings,
+      soldSection: site.soldSection || window.BULLDOMINGO_SITE.soldSection,
+      listings: properties.map(function (p) { return propToListing(p, false); }),
+      soldListings: soldProperties.map(function (p) { return propToListing(p, true); }),
       about: site.about,
       whyUs: site.whyUs,
       contact: site.contact,
       footer: site.footer
     };
 
-    var json = JSON.stringify(exportObj, null, 2);
-    var fileContent =
+    var ts = new Date().toISOString();
+    var js =
       "/**\n" +
-      " * Bulldomingo — site content\n" +
-      " * Exported on " + new Date().toLocaleString() + "\n" +
-      " * Drop this file next to index.html and site-app.js\n" +
+      " * Bulldomingo \u2014 site content (edit this file locally; no HTML needed)\n" +
+      " * Photo paths are relative to this HTML file (same folder as images).\n" +
+      " * Exported: " + ts + "\n" +
       " */\n" +
-      "window.BULLDOMINGO_SITE = " + json + ";\n";
+      "window.BULLDOMINGO_SITE = " +
+      JSON.stringify(exportObj, null, 2) +
+      ";\n";
 
-    var blob = new Blob([fileContent], { type: "application/javascript" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "site-data.js";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () {
+    try {
+      var blob = new Blob([js], { type: "text/javascript" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "site-data.js";
+      document.body.appendChild(a);
+      a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    }, 200);
-
-    alert("✅ site-data.js downloaded!\\n\\nReplace the old site-data.js in your folder with this one, then push to GitHub. Your changes are now permanent.");
+    } catch (e) {
+      alert("Export failed: " + (e && e.message ? e.message : e));
+    }
   }
 
   function setupEditModeUi() {
@@ -2080,6 +2275,15 @@
     }
     var btn = document.getElementById("btnAddProperty");
     if (btn) btn.onclick = addProperty;
+    var exportBtn = document.getElementById("btnExportSiteData");
+    if (exportBtn) exportBtn.onclick = exportSiteData;
+    var soldToolbar = document.getElementById("soldEditToolbar");
+    if (soldToolbar) {
+      soldToolbar.style.display = "";
+      soldToolbar.setAttribute("aria-hidden", "false");
+    }
+    var soldBtn = document.getElementById("btnAddSoldProperty");
+    if (soldBtn) soldBtn.onclick = addSoldProperty;
 
     var h = document.getElementById("btnEditHero");
     if (h) h.onclick = openHeroEditor;
@@ -2091,8 +2295,6 @@
     if (wy) wy.onclick = openWhyUsEditor;
     var cf = document.getElementById("btnEditContact");
     if (cf) cf.onclick = openContactFooterEditor;
-    var ex = document.getElementById("btnExportSiteData");
-    if (ex) ex.onclick = exportSiteDataJs;
   }
 
   /* ================================================================
@@ -2103,6 +2305,7 @@
     renderHero(site);
     renderPropertiesHeader(site);
     renderProperties();
+    renderSoldShowcase(site);
     renderAbout(site);
     renderAboutVisual(site);
     renderWhyUs(site);
@@ -2113,6 +2316,7 @@
     setupSmoothScroll();
     setupViewModalEvents();
     setupCardClickHandlers();
+    setupSoldCardClickHandlers();
     setupStorageSync();
     setupEditModeUi();
 
@@ -2120,7 +2324,7 @@
       var cms = document.getElementById("cmsEditModal");
       if (cms && cms.classList.contains("cms-modal-open")) {
         flushEditFormToProperty();
-        saveProperties();
+        saveContextProperties();
       }
     });
 
@@ -2164,6 +2368,10 @@
         }
       })
       .then(function () {
+        return loadSoldPropertiesAsync();
+      })
+      .then(function (sold) {
+        soldProperties = sold;
         return loadSiteOverridesAsync();
       })
       .then(function () {
@@ -2171,10 +2379,9 @@
       })
       .catch(function () {
         properties = loadPropertiesFromSite();
-        saveProperties()
-          .then(function () {
-            return loadSiteOverridesAsync();
-          })
+        soldProperties = loadSoldPropertiesFromSite();
+        Promise.all([saveProperties(), saveSoldProperties()])
+          .then(function () { return loadSiteOverridesAsync(); })
           .then(finishInit, finishInit);
       });
   }
